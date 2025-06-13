@@ -49,3 +49,7 @@ benchconf.json
 scripts/fake.sh
 do_not_version/
 /ui/desktop/src/bin/temporal
+
+# Lockfiles – managed locally, not committed
+ui/desktop/bun.lock
+ui/desktop/package-lock.json
