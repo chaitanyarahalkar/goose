@@ -336,7 +336,7 @@ enum Command {
             value_name = "NAME",
             help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
             long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
-            value_delimiter = ',',
+            value_delimiter = ','
         )]
         builtins: Vec<String>,
     },
@@ -478,7 +478,7 @@ enum Command {
             value_name = "NAME",
             help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
             long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
-            value_delimiter = ',',
+            value_delimiter = ','
         )]
         builtins: Vec<String>,
 
@@ -486,7 +486,7 @@ enum Command {
         #[arg(
             short = 'q',
             long = "quiet",
-            help = "Quiet mode. Suppress non-response output, printing only the model response to stdout",
+            help = "Quiet mode. Suppress non-response output, printing only the model response to stdout"
         )]
         quiet: bool,
     },
