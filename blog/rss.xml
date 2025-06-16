@@ -16,26 +16,25 @@
             <description><![CDATA[How Goose uses multiple LLMs within a single task, optimizing for speed, cost, and reliability in AI agent workflows]]></description>
             <content:encoded><![CDATA[<p><img decoding="async" loading="lazy" alt="blog cover" src="https://block.github.io/goose/assets/images/multi-model-ai-agent-d408feaeba3e13cafdbfe9377980bc3d.png" width="1200" height="630" class="img_ev3q"></p>
 <p>Not every task needs a genius. And not every step should cost a fortune.</p>
-<p>That's something we've learned the hard way while scaling Goose, our open source AI agent. The same model that's great at unpacking a gnarly planning request might totally fumble a basic shell command—or worse, it might burn through your token budget doing it.</p>
+<p>That's something we've learned while scaling Goose, our open source AI agent. The same model that's great at unpacking a planning request might totally fumble a basic shell command, or worse - it might burn through your token budget doing it.</p>
 <p>So we asked ourselves: what if we could mix and match models in a single session?</p>
 <p>Not just switching based on user commands, but building Goose with an actual system for routing tasks between different models, each playing to their strengths.</p>
 <p>This is the gap the lead/worker model is designed to fill.</p>
-<h2 class="anchor anchorWithStickyNavbar_LWe7" id="the-problem-with-one-model-sessions">The Problem With One-Model Sessions<a href="https://block.github.io/goose/blog/2025/06/16/multi-model-in-goose#the-problem-with-one-model-sessions" class="hash-link" aria-label="Direct link to The Problem With One-Model Sessions" title="Direct link to The Problem With One-Model Sessions">​</a></h2>
+<h2 class="anchor anchorWithStickyNavbar_LWe7" id="the-problem-with-single-model-sessions">The Problem with Single-Model Sessions<a href="https://block.github.io/goose/blog/2025/06/16/multi-model-in-goose#the-problem-with-single-model-sessions" class="hash-link" aria-label="Direct link to The Problem with Single-Model Sessions" title="Direct link to The Problem with Single-Model Sessions">​</a></h2>
 <p>Originally, every Goose session used a single model from start to finish. That worked fine for short tasks, but longer sessions were harder to tune:</p>
 <ul>
 <li>Go too cheap, and the model might miss nuance or break tools.</li>
 <li>Go too premium, and your cost graph starts looking like a ski slope.</li>
 </ul>
 <p>There was no built-in way to adapt on the fly.</p>
-<p>We saw this tension in real usage: agents would start strong, then stall out when the model struggled to follow through. Sometimes users would manually switch models mid-session. But that's not scalable, and definitely not agent like.</p>
+<p>We saw this tension in real usage where agents would start strong, then stall out when the model struggled to follow through. Sometimes users would manually switch models mid-session. But that's not scalable, and definitely not agent like.</p>
 <h2 class="anchor anchorWithStickyNavbar_LWe7" id="designing-the-leadworker-system">Designing the Lead/Worker System<a href="https://block.github.io/goose/blog/2025/06/16/multi-model-in-goose#designing-the-leadworker-system" class="hash-link" aria-label="Direct link to Designing the Lead/Worker System" title="Direct link to Designing the Lead/Worker System">​</a></h2>
 <p>The core idea is simple:</p>
 <ul>
 <li>Start the session with a lead model that's strong at reasoning and planning.</li>
-<li>After a few back-and-forths between you and the model (what we call "turns"), hand off to a worker model that's faster and cheaper, but still capable.</li>
+<li>After a few back and forths between you and the model (what we call "turns"), hand off to a worker model that's faster and cheaper, but still capable.</li>
 <li>If the worker gets stuck, Goose can detect the failure and temporarily bring the lead back in.</li>
 </ul>
-<p>It's turn-based, transparent, and automatic.</p>
 <p>You can configure how many turns the lead handles upfront (<code>GOOSE_LEAD_TURNS</code>), how many consecutive failures trigger fallback (<code>GOOSE_LEAD_FAILURE_THRESHOLD</code>), and how long the fallback lasts before Goose retries the worker.</p>
 <p>This gives you a flexible, resilient setup where each model gets used where it shines.</p>
 <p>One of the trickiest parts of this feature was defining what failure looks like.</p>
@@ -55,14 +54,14 @@
 <li><strong>Cross-provider setups</strong> (Claude for planning, OpenAI for execution)</li>
 <li><strong>Lower-friction defaults</strong> for teams worried about LLM spend</li>
 </ul>
-<p>It also opens the door for even smarter routing in the future—task-type switching, ensemble voting, maybe even letting Goose decide which model to call based on tool context.</p>
+<p>It also opens the door for even smarter routing in the future with things like switching based on tasks, ensemble voting, or maybe even letting Goose decide which model to call based on tool context.</p>
 <h2 class="anchor anchorWithStickyNavbar_LWe7" id="try-it-out">Try It Out<a href="https://block.github.io/goose/blog/2025/06/16/multi-model-in-goose#try-it-out" class="hash-link" aria-label="Direct link to Try It Out" title="Direct link to Try It Out">​</a></h2>
-<p><a href="https://block.github.io/goose/docs/tutorials/lead-worker">Lead/worker mode</a> is already available in Goose.  To enable, simply export these variables with two models that have already been configured in Goose:</p>
+<p>Lead/worker mode is already available in Goose.  To enable, export these variables with two models that have already been configured in Goose:</p>
 <div class="language-bash codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_biex"><pre tabindex="0" class="prism-code language-bash codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><span class="token-line" style="color:#393A34"><span class="token plain">export GOOSE_LEAD_MODEL="gpt-4o"</span><br></span><span class="token-line" style="color:#393A34"><span class="token plain">export GOOSE_MODEL="claude-4-sonnet"</span><br></span></code></pre><div class="buttonGroup__atx"><button type="button" aria-label="Copy code to clipboard" title="Copy" class="clean-btn"><span class="copyButtonIcons_eSgA" aria-hidden="true"><svg viewBox="0 0 24 24" class="copyButtonIcon_y97N"><path fill="currentColor" d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"></path></svg><svg viewBox="0 0 24 24" class="copyButtonSuccessIcon_LjdS"><path fill="currentColor" d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"></path></svg></span></button></div></div></div>
 <p>From there, Goose takes care of the hand off, the fallback, and the recovery. You just... keep vibing.</p>
 <p>If you're curious how it all works under the hood, we've got a <a href="https://block.github.io/goose/docs/tutorials/lead-worker">full tutorial</a>.</p>
 <hr>
-<p>We'll keep sharing what we're learning as we build toward more dynamic useful AI agents. If you're experimenting with multi-model setups, <a href="https://discord.gg/block-opensource" target="_blank" rel="noopener noreferrer">share</a> what's working and what isn't.</p>
+<p>If you're experimenting with multi-model setups, <a href="https://discord.gg/block-opensource" target="_blank" rel="noopener noreferrer">share what's working and what isn't</a>.</p>
 ]]></content:encoded>
         </item>
         <item>
