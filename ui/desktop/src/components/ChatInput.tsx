@@ -51,7 +51,6 @@ export default function ChatInput({
   const [isFocused, setIsFocused] = useState(false);
   const [pastedImages, setPastedImages] = useState<PastedImage[]>([]);
 
-  // ADD_BELOW: history search state
   const [isHistorySearchOpen, setIsHistorySearchOpen] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historySearchResults, setHistorySearchResults] = useState<string[]>([]);
@@ -116,7 +115,6 @@ export default function ChatInput({
   const minHeight = '1rem';
   const maxHeight = 10 * 24;
 
-  // === History search helpers ===
   const getCombinedHistory = useCallback(() => {
     // Combine current chat history and global history, removing duplicates while preserving order
     const globalHistory = LocalMessageStorage.getRecentMessages();
@@ -599,7 +597,7 @@ export default function ChatInput({
           data-testid="chat-input"
           autoFocus
           id="dynamic-textarea"
-          placeholder="What can goose help with?   ⌘↑/⌘↓ • ⌃R search"
+          placeholder="What can goose help with?   ⌘↑/⌘↓ ⌃R search"
           value={displayValue}
           onChange={handleChange}
           onCompositionStart={handleCompositionStart}
