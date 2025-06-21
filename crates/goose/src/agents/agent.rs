@@ -17,6 +17,7 @@ use crate::permission::PermissionConfirmation;
 use crate::providers::base::Provider;
 use crate::providers::errors::ProviderError;
 use crate::recipe::{Author, Recipe, Settings};
+use crate::scheduler_trait::SchedulerTrait;
 use crate::tool_monitor::{ToolCall, ToolMonitor};
 use regex::Regex;
 use serde_json::Value;
@@ -27,7 +28,8 @@ use crate::agents::extension::{ExtensionConfig, ExtensionError, ExtensionResult,
 use crate::agents::extension_manager::{get_parameter_names, ExtensionManager};
 use crate::agents::platform_tools::{
     PLATFORM_LIST_RESOURCES_TOOL_NAME, PLATFORM_MANAGE_EXTENSIONS_TOOL_NAME,
-    PLATFORM_READ_RESOURCE_TOOL_NAME, PLATFORM_SEARCH_AVAILABLE_EXTENSIONS_TOOL_NAME,
+    PLATFORM_MANAGE_SCHEDULE_TOOL_NAME, PLATFORM_READ_RESOURCE_TOOL_NAME,
+    PLATFORM_SEARCH_AVAILABLE_EXTENSIONS_TOOL_NAME,
 };
 use crate::agents::prompt_manager::PromptManager;
 use crate::agents::router_tool_selector::{
@@ -59,12 +61,14 @@ pub struct Agent {
     pub(super) tool_result_rx: ToolResultReceiver,
     pub(super) tool_monitor: Mutex<Option<ToolMonitor>>,
     pub(super) router_tool_selector: Mutex<Option<Arc<Box<dyn RouterToolSelector>>>>,
+    pub(super) scheduler_service: Mutex<Option<Arc<dyn SchedulerTrait>>>,
 }
 
 #[derive(Clone, Debug)]
 pub enum AgentEvent {
     Message(Message),
     McpNotification((String, JsonRpcMessage)),
+    ModelChange { model: String, mode: String },
 }
 
 impl Agent {
@@ -85,6 +89,7 @@ impl Agent {
             tool_result_rx: Arc::new(Mutex::new(tool_rx)),
             tool_monitor: Mutex::new(None),
             router_tool_selector: Mutex::new(None),
+            scheduler_service: Mutex::new(None),
         }
     }
 
@@ -102,6 +107,12 @@ impl Agent {
         if let Some(monitor) = self.tool_monitor.lock().await.as_mut() {
             monitor.reset();
         }
+    }
+
+    /// Set the scheduler service for this agent
+    pub async fn set_scheduler(&self, scheduler: Arc<dyn SchedulerTrait>) {
+        let mut scheduler_service = self.scheduler_service.lock().await;
+        *scheduler_service = Some(scheduler);
     }
 }
 
@@ -184,7 +195,7 @@ impl Agent {
 
     /// Dispatch a single tool call to the appropriate client
     #[instrument(skip(self, tool_call, request_id), fields(input, output))]
-    pub(super) async fn dispatch_tool_call(
+    pub async fn dispatch_tool_call(
         &self,
         tool_call: mcp_core::tool::ToolCall,
         request_id: String,
@@ -201,6 +212,13 @@ impl Agent {
                     )),
                 );
             }
+        }
+
+        if tool_call.name == PLATFORM_MANAGE_SCHEDULE_TOOL_NAME {
+            let result = self
+                .handle_schedule_management(tool_call.arguments, request_id.clone())
+                .await;
+            return (request_id, Ok(ToolCallResult::from(result)));
         }
 
         if tool_call.name == PLATFORM_MANAGE_EXTENSIONS_TOOL_NAME {
@@ -303,6 +321,31 @@ impl Agent {
     ) -> (String, Result<Vec<Content>, ToolError>) {
         let mut extension_manager = self.extension_manager.lock().await;
 
+        let selector = self.router_tool_selector.lock().await.clone();
+        if ToolRouterIndexManager::is_tool_router_enabled(&selector) {
+            if let Some(selector) = selector {
+                let selector_action = if action == "disable" { "remove" } else { "add" };
+                let extension_manager = self.extension_manager.lock().await;
+                let selector = Arc::new(selector);
+                if let Err(e) = ToolRouterIndexManager::update_extension_tools(
+                    &selector,
+                    &extension_manager,
+                    &extension_name,
+                    selector_action,
+                )
+                .await
+                {
+                    return (
+                        request_id,
+                        Err(ToolError::ExecutionError(format!(
+                            "Failed to update vector index: {}",
+                            e
+                        ))),
+                    );
+                }
+            }
+        }
+
         if action == "disable" {
             let result = extension_manager
                 .remove_extension(&extension_name)
@@ -350,34 +393,6 @@ impl Agent {
             })
             .map_err(|e| ToolError::ExecutionError(e.to_string()));
 
-        // Update vector index if operation was successful and vector routing is enabled
-        if result.is_ok() {
-            let selector = self.router_tool_selector.lock().await.clone();
-            if ToolRouterIndexManager::is_tool_router_enabled(&selector) {
-                if let Some(selector) = selector {
-                    let vector_action = if action == "disable" { "remove" } else { "add" };
-                    let extension_manager = self.extension_manager.lock().await;
-                    let selector = Arc::new(selector);
-                    if let Err(e) = ToolRouterIndexManager::update_extension_tools(
-                        &selector,
-                        &extension_manager,
-                        &extension_name,
-                        vector_action,
-                    )
-                    .await
-                    {
-                        return (
-                            request_id,
-                            Err(ToolError::ExecutionError(format!(
-                                "Failed to update vector index: {}",
-                                e
-                            ))),
-                        );
-                    }
-                }
-            }
-        }
-
         (request_id, result)
     }
 
@@ -413,7 +428,7 @@ impl Agent {
                 let mut extension_manager = self.extension_manager.lock().await;
                 extension_manager.add_extension(extension.clone()).await?;
             }
-        };
+        }
 
         // If vector tool selection is enabled, index the tools
         let selector = self.router_tool_selector.lock().await.clone();
@@ -452,6 +467,7 @@ impl Agent {
             // Add platform tools
             prefixed_tools.push(platform_tools::search_available_extensions_tool());
             prefixed_tools.push(platform_tools::manage_extensions_tool());
+            prefixed_tools.push(platform_tools::manage_schedule_tool());
 
             // Add resource tools if supported
             if extension_manager.supports_resources() {
@@ -502,9 +518,6 @@ impl Agent {
     }
 
     pub async fn remove_extension(&self, name: &str) -> Result<()> {
-        let mut extension_manager = self.extension_manager.lock().await;
-        extension_manager.remove_extension(name).await?;
-
         // If vector tool selection is enabled, remove tools from the index
         let selector = self.router_tool_selector.lock().await.clone();
         if ToolRouterIndexManager::is_tool_router_enabled(&selector) {
@@ -519,6 +532,9 @@ impl Agent {
                 .await?;
             }
         }
+
+        let mut extension_manager = self.extension_manager.lock().await;
+        extension_manager.remove_extension(name).await?;
 
         Ok(())
     }
@@ -558,7 +574,25 @@ impl Agent {
         let (mut tools, mut toolshim_tools, mut system_prompt) =
             self.prepare_tools_and_prompt().await?;
 
-        let goose_mode = config.get_param("GOOSE_MODE").unwrap_or("auto".to_string());
+        // Get goose_mode from config, but override with execution_mode if provided in session config
+        let mut goose_mode = config.get_param("GOOSE_MODE").unwrap_or("auto".to_string());
+
+        // If this is a scheduled job with an execution_mode, override the goose_mode
+        if let Some(session_config) = &session {
+            if let Some(execution_mode) = &session_config.execution_mode {
+                // Map "foreground" to "auto" and "background" to "chat"
+                goose_mode = match execution_mode.as_str() {
+                    "foreground" => "auto".to_string(),
+                    "background" => "chat".to_string(),
+                    _ => goose_mode,
+                };
+                tracing::info!(
+                    "Using execution_mode '{}' which maps to goose_mode '{}'",
+                    execution_mode,
+                    goose_mode
+                );
+            }
+        }
 
         let (tools_with_readonly_annotation, tools_without_annotation) =
             Self::categorize_tools_by_annotation(&tools);
@@ -582,6 +616,26 @@ impl Agent {
                     &toolshim_tools,
                 ).await {
                     Ok((response, usage)) => {
+                        // Emit model change event if provider is lead-worker
+                        let provider = self.provider().await?;
+                        if let Some(lead_worker) = provider.as_lead_worker() {
+                            // The actual model used is in the usage
+                            let active_model = usage.model.clone();
+                            let (lead_model, worker_model) = lead_worker.get_model_info();
+                            let mode = if active_model == lead_model {
+                                "lead"
+                            } else if active_model == worker_model {
+                                "worker"
+                            } else {
+                                "unknown"
+                            };
+
+                            yield AgentEvent::ModelChange {
+                                model: active_model,
+                                mode: mode.to_string(),
+                            };
+                        }
+
                         // record usage for the session in the session file
                         if let Some(session_config) = session.clone() {
                             Self::update_session_metrics(session_config, &usage, messages.len()).await?;

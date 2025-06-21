@@ -160,6 +160,10 @@ const config: Config = {
               label: 'Prompt Library',
             },
             {
+              to: '/recipes',
+              label: 'Recipe Cookbook',
+            },
+            {
               to: 'deeplink-generator',
               label: 'Deeplink Generator',
             },
@@ -196,6 +200,10 @@ const config: Config = {
         {
           title: "Community",
           items: [
+            {
+              label: "Spotlight",
+              to: "community",
+            },
             {
               label: "Discord",
               href: "https://discord.gg/block-opensource",
