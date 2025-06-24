@@ -66,9 +66,36 @@ pub struct ClientInfo {
     pub version: String,
 }
 
+/// Represents a root directory exposed by the client to servers
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct Root {
+    /// The URI of the root directory. Must be a file:// URI in the current spec.
+    pub uri: String,
+    /// Optional display name for the root
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Result of listing roots
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct ListRootsResult {
+    pub roots: Vec<Root>,
+}
+
+/// Capability for roots support
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RootsCapability {
+    /// Whether the client supports notifications when the roots list changes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_changed: Option<bool>,
+}
+
 #[derive(Serialize, Deserialize, Default)]
 pub struct ClientCapabilities {
-    // Add fields as needed. For now, empty capabilities are fine.
+    /// Roots capability - allows the client to expose filesystem roots to servers
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub roots: Option<RootsCapability>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -103,6 +130,15 @@ pub trait McpClientTrait: Send + Sync {
 
     async fn get_prompt(&self, name: &str, arguments: Value) -> Result<GetPromptResult, Error>;
 
+    /// Configure the roots that this client exposes to servers
+    async fn set_roots(&self, roots: Vec<Root>);
+
+    /// List the roots exposed by the client
+    async fn list_roots(&self) -> Result<ListRootsResult, Error>;
+
+    /// Send a notification that the roots list has changed
+    async fn notify_roots_changed(&self) -> Result<(), Error>;
+
     async fn subscribe(&self) -> mpsc::Receiver<JsonRpcMessage>;
 }
 
@@ -116,6 +152,8 @@ where
     server_capabilities: Option<ServerCapabilities>,
     server_info: Option<Implementation>,
     notification_subscribers: Arc<Mutex<Vec<mpsc::Sender<JsonRpcMessage>>>>,
+    /// The roots exposed by this client to servers
+    roots: Arc<Mutex<Vec<Root>>>,
 }
 
 impl<T> McpClient<T>
@@ -128,6 +166,8 @@ where
         let notification_subscribers =
             Arc::new(Mutex::new(Vec::<mpsc::Sender<JsonRpcMessage>>::new()));
         let subscribers_ptr = notification_subscribers.clone();
+        let roots = Arc::new(Mutex::new(Vec::<Root>::new()));
+        let roots_ptr = roots.clone();
 
         tokio::spawn(async move {
             loop {
@@ -135,6 +175,27 @@ where
                     Ok(message) => {
                         tracing::info!("Received message: {:?}", message);
                         match message {
+                            JsonRpcMessage::Request(ref request) => {
+                                // Handle roots/list requests from servers
+                                if request.method == "roots/list" {
+                                    let roots = roots_ptr.lock().await;
+                                    let response = JsonRpcResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id: request.id,
+                                        result: Some(serde_json::to_value(ListRootsResult {
+                                            roots: roots.clone(),
+                                        }).unwrap_or(json!({}))),
+                                        error: None,
+                                    };
+                                    // Send the response back through the transport
+                                    if let Err(e) = transport.send(JsonRpcMessage::Response(response)).await {
+                                        tracing::error!("Failed to send roots/list response: {}", e);
+                                    }
+                                } else {
+                                    // For other requests, treat them as unhandled
+                                    tracing::warn!("Received unhandled request: {}", request.method);
+                                }
+                            }
                             JsonRpcMessage::Response(JsonRpcResponse { id: Some(id), .. })
                             | JsonRpcMessage::Error(JsonRpcError { id: Some(id), .. }) => {
                                 service_ptr.respond(&id.to_string(), Ok(message)).await;
@@ -162,7 +223,26 @@ where
             server_capabilities: None,
             server_info: None,
             notification_subscribers,
+            roots,
         })
+    }
+
+    /// Configure the roots that this client exposes to servers
+    pub async fn set_roots(&self, roots: Vec<Root>) {
+        let mut roots_lock = self.roots.lock().await;
+        *roots_lock = roots;
+    }
+
+    /// Add a root to the list of exposed roots
+    pub async fn add_root(&self, root: Root) {
+        let mut roots_lock = self.roots.lock().await;
+        roots_lock.push(root);
+    }
+
+    /// Remove all roots
+    pub async fn clear_roots(&self) {
+        let mut roots_lock = self.roots.lock().await;
+        roots_lock.clear();
     }
 
     /// Send a JSON-RPC request and check we don't get an error response.
@@ -428,6 +508,27 @@ where
         let params = serde_json::json!({ "name": name, "arguments": arguments });
 
         self.send_request("prompts/get", params).await
+    }
+
+    async fn set_roots(&self, roots: Vec<Root>) {
+        let mut roots_lock = self.roots.lock().await;
+        *roots_lock = roots;
+    }
+
+    async fn list_roots(&self) -> Result<ListRootsResult, Error> {
+        let roots = self.roots.lock().await;
+        Ok(ListRootsResult { roots: roots.clone() })
+    }
+
+    async fn notify_roots_changed(&self) -> Result<(), Error> {
+        if !self.completed_initialization() {
+            return Err(Error::NotInitialized);
+        }
+
+        self.send_notification("notifications/roots/list_changed", serde_json::json!({}))
+            .await?;
+
+        Ok(())
     }
 
     async fn subscribe(&self) -> mpsc::Receiver<JsonRpcMessage> {

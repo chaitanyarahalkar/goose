@@ -4,6 +4,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use futures::{future, FutureExt};
 use mcp_core::protocol::GetPromptResult;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -17,7 +18,7 @@ use super::tool_execution::ToolCallResult;
 use crate::agents::extension::Envs;
 use crate::config::{Config, ExtensionConfigManager};
 use crate::prompt_template;
-use mcp_client::client::{ClientCapabilities, ClientInfo, McpClient, McpClientTrait};
+use mcp_client::client::{ClientCapabilities, ClientInfo, McpClient, McpClientTrait, Root, RootsCapability};
 use mcp_client::transport::{SseTransport, StdioTransport, Transport};
 use mcp_core::{prompt::Prompt, Content, Tool, ToolCall, ToolError};
 use serde_json::Value;
@@ -34,6 +35,8 @@ pub struct ExtensionManager {
     clients: HashMap<String, McpClientBox>,
     instructions: HashMap<String, String>,
     resource_capable_extensions: HashSet<String>,
+    /// The working directory that will be exposed as a root to MCP servers
+    working_dir: Option<PathBuf>,
 }
 
 /// A flattened representation of a resource used by the agent to prepare inference
@@ -104,7 +107,23 @@ impl ExtensionManager {
             clients: HashMap::new(),
             instructions: HashMap::new(),
             resource_capable_extensions: HashSet::new(),
+            working_dir: None,
         }
+    }
+
+    /// Create a new ExtensionManager instance with a working directory
+    pub fn with_working_dir(working_dir: PathBuf) -> Self {
+        Self {
+            clients: HashMap::new(),
+            instructions: HashMap::new(),
+            resource_capable_extensions: HashSet::new(),
+            working_dir: Some(working_dir),
+        }
+    }
+
+    /// Set the working directory that will be exposed as a root to MCP servers
+    pub fn set_working_dir(&mut self, working_dir: PathBuf) {
+        self.working_dir = Some(working_dir);
     }
 
     pub fn supports_resources(&self) -> bool {
@@ -246,12 +265,30 @@ impl ExtensionManager {
             _ => unreachable!(),
         };
 
-        // Initialize the client with default capabilities
+        // Configure roots if we have a working directory
+        if let Some(working_dir) = &self.working_dir {
+            let root = Root {
+                uri: format!("file://{}", working_dir.display()),
+                name: Some("Working Directory".to_string()),
+            };
+            client.set_roots(vec![root]).await;
+        }
+
+        // Initialize the client with capabilities including roots support
         let info = ClientInfo {
             name: "goose".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         };
-        let capabilities = ClientCapabilities::default();
+        
+        let capabilities = if self.working_dir.is_some() {
+            ClientCapabilities {
+                roots: Some(RootsCapability {
+                    list_changed: Some(true),
+                }),
+            }
+        } else {
+            ClientCapabilities::default()
+        };
 
         let init_result = client
             .initialize(info, capabilities)
@@ -861,6 +898,18 @@ mod tests {
             _arguments: Value,
         ) -> Result<GetPromptResult, Error> {
             Err(Error::NotInitialized)
+        }
+
+        async fn set_roots(&self, _roots: Vec<mcp_client::Root>) {
+            // Mock implementation - no-op
+        }
+
+        async fn list_roots(&self) -> Result<mcp_client::client::ListRootsResult, Error> {
+            Ok(mcp_client::client::ListRootsResult { roots: vec![] })
+        }
+
+        async fn notify_roots_changed(&self) -> Result<(), Error> {
+            Ok(())
         }
 
         async fn subscribe(&self) -> mpsc::Receiver<JsonRpcMessage> {
