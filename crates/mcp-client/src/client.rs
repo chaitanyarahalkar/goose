@@ -66,9 +66,23 @@ pub struct ClientInfo {
     pub version: String,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct ClientCapabilities {
-    // Add fields as needed. For now, empty capabilities are fine.
+    /// Advertise support for elicitation so that MCP servers can issue
+    /// `elicitation/create` requests. Currently `goose` automatically
+    /// rejects such requests, but declaring the capability prevents
+    /// protocol negotiations from failing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elicitation: Option<serde_json::Value>,
+}
+
+// Provide a manual Default impl to include the elicitation capability
+impl Default for ClientCapabilities {
+    fn default() -> Self {
+        Self {
+            elicitation: Some(serde_json::json!({})),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -135,6 +149,70 @@ where
                     Ok(message) => {
                         tracing::info!("Received message: {:?}", message);
                         match message {
+                            // Interactive handling for `elicitation/create`.
+                            JsonRpcMessage::Request(ref req) if req.method == "elicitation/create" => {
+                                // Clone pieces we need before we await.
+                                let id_opt = req.id.clone();
+                                let params_val = req.params.clone().unwrap_or_default();
+
+                                // Spawn a blocking task so we don't block the async runtime while waiting on stdin.
+                                let user_response = tokio::task::spawn_blocking(move || {
+                                    use std::io::{self, Write};
+                                    println!("\n--- ELICITATION REQUEST ------------------------------------------------");
+                                    if let Some(msg) = params_val.get("message").and_then(|v| v.as_str()) {
+                                        println!("{}", msg);
+                                    }
+
+                                    // Show requested schema for transparency
+                                    if let Some(schema) = params_val.get("requestedSchema") {
+                                        println!("Requested schema: {}", schema);
+                                    }
+
+                                    println!("Enter JSON value to accept, or type 'reject' to deny, 'cancel' to cancel:");
+                                    print!("> ");
+                                    let _ = io::stdout().flush();
+
+                                    let mut input = String::new();
+                                    if let Err(e) = io::stdin().read_line(&mut input) {
+                                        eprintln!("Failed to read input: {}", e);
+                                        return serde_json::json!({"action": "reject"});
+                                    }
+                                    let trimmed = input.trim();
+                                    if trimmed.eq_ignore_ascii_case("reject") {
+                                        return serde_json::json!({"action": "reject"});
+                                    }
+                                    if trimmed.eq_ignore_ascii_case("cancel") {
+                                        return serde_json::json!({"action": "cancel"});
+                                    }
+
+                                    // Try parse JSON
+                                    match serde_json::from_str::<serde_json::Value>(trimmed) {
+                                        Ok(v) => serde_json::json!({"action": "accept", "content": v}),
+                                        Err(_) => {
+                                            // treat as simple string
+                                            serde_json::json!({"action": "accept", "content": trimmed})
+                                        }
+                                    }
+                                }).await.unwrap_or_else(|_| serde_json::json!({"action": "reject"}));
+
+                                if let Some(id) = id_opt {
+                                    let response = JsonRpcMessage::Response(JsonRpcResponse {
+                                        jsonrpc: "2.0".to_string(),
+                                        id: Some(id),
+                                        result: Some(user_response),
+                                        error: None,
+                                    });
+
+                                    if let Err(e) = transport.send(response).await {
+                                        tracing::error!(error = ?e, "Failed to send elicitation response");
+                                        service_ptr.hangup(e).await;
+                                    }
+                                }
+
+                                // Forward to subscribers as before
+                                let mut subs = subscribers_ptr.lock().await;
+                                subs.retain(|sub| sub.try_send(message.clone()).is_ok());
+                            }
                             JsonRpcMessage::Response(JsonRpcResponse { id: Some(id), .. })
                             | JsonRpcMessage::Error(JsonRpcError { id: Some(id), .. }) => {
                                 service_ptr.respond(&id.to_string(), Ok(message)).await;
