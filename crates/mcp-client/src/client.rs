@@ -150,7 +150,9 @@ where
                         tracing::info!("Received message: {:?}", message);
                         match message {
                             // Interactive handling for `elicitation/create`.
-                            JsonRpcMessage::Request(ref req) if req.method == "elicitation/create" => {
+                            JsonRpcMessage::Request(ref req)
+                                if req.method == "elicitation/create" =>
+                            {
                                 // Clone pieces we need before we await.
                                 let id_opt = req.id.clone();
                                 let params_val = req.params.clone().unwrap_or_default();
