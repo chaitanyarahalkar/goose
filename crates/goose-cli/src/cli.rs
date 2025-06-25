@@ -339,9 +339,13 @@ enum Command {
             value_name = "NAME",
             help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
             long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
-            value_delimiter = ','
+            value_delimiter = ',',
         )]
         builtins: Vec<String>,
+
+        /// Launch the interactive session using a full-screen TUI (powered by ratatui)
+        #[arg(long, help = "Use experimental TUI interface instead of line-by-line mode")]
+        tui: bool,
     },
 
     /// Open the last project directory
@@ -627,6 +631,7 @@ pub async fn cli() -> Result<()> {
             extensions,
             remote_extensions,
             builtins,
+            tui,
         }) => {
             return match command {
                 Some(SessionCommand::List {
@@ -659,7 +664,7 @@ pub async fn cli() -> Result<()> {
                     Ok(())
                 }
                 None => {
-                    // Run session command by default
+                    // Run session command by default (either standard REPL or TUI)
                     let mut session: crate::Session = build_session(SessionBuilderConfig {
                         identifier: identifier.map(extract_identifier),
                         resume,
@@ -687,7 +692,11 @@ pub async fn cli() -> Result<()> {
                         session.render_message_history();
                     }
 
-                    let _ = session.interactive(None).await;
+                    if tui {
+                        let _ = session.interactive_tui(None).await;
+                    } else {
+                        let _ = session.interactive(None).await;
+                    }
                     Ok(())
                 }
             };
