@@ -65,6 +65,20 @@ export default function ChatInput({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [processedFilePaths, setProcessedFilePaths] = useState<string[]>([]);
 
+  /**
+   * Detect operating system so we can customise keyboard shortcuts where
+   * necessary.  Ctrl+R triggers a hard refresh on Windows in Electron, which
+   * we cannot reliably intercept.  Instead, we fall back to Ctrl+H (H for
+   * "History") on Windows while keeping Ctrl+R on macOS / Linux.
+   */
+  const isWindows = useMemo(() => typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('WIN'), []);
+  const isMac = useMemo(() => typeof navigator !== 'undefined' && navigator.platform.toUpperCase().includes('MAC'), []);
+
+  // Human-friendly hints displayed in the textarea placeholder.
+  const arrowHint = isMac ? '⌘↑/⌘↓' : 'Ctrl↑/Ctrl↓';
+  const searchKeyHint = isWindows ? 'Ctrl+H' : '⌃R';
+  const placeholderText = `What can goose help with?   ${arrowHint} ${searchKeyHint} search`;
+
   const updateInitialValueRef = useRef(initialValue);
   // We add this effect later (after closeHistorySearch) to satisfy dependency order.
 
@@ -449,8 +463,11 @@ export default function ChatInput({
   };
 
   const handleKeyDown = (evt: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Open history search with Ctrl+R (not meta key to avoid refresh)
-    if (!evt.shiftKey && !evt.metaKey && evt.ctrlKey && evt.key.toLowerCase() === 'r') {
+    // Open history search. Use Ctrl+R everywhere except Windows where we
+    // switch to Ctrl+H to avoid triggering a full refresh.
+    const searchShortcutKey = isWindows ? 'h' : 'r';
+
+    if (!evt.shiftKey && !evt.metaKey && evt.ctrlKey && evt.key.toLowerCase() === searchShortcutKey) {
       evt.preventDefault();
       openHistorySearch();
       return;
@@ -597,7 +614,7 @@ export default function ChatInput({
           data-testid="chat-input"
           autoFocus
           id="dynamic-textarea"
-          placeholder="What can goose help with?   ⌘↑/⌘↓ ⌃R search"
+          placeholder={placeholderText}
           value={displayValue}
           onChange={handleChange}
           onCompositionStart={handleCompositionStart}
