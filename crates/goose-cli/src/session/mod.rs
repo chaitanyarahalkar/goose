@@ -5,6 +5,7 @@ mod input;
 mod output;
 mod prompt;
 mod thinking;
+pub mod tui;
 
 pub use self::export::message_to_markdown;
 pub use builder::{build_session, SessionBuilderConfig, SessionSettings};
@@ -1299,6 +1300,18 @@ impl Session {
         serde_yaml::to_writer(file, recipe).context("Failed to save recipe")?;
 
         Ok(path)
+    }
+
+    /// Start an interactive TUI session using `ratatui`.
+    pub async fn interactive_tui(&mut self, message: Option<String>) -> Result<()> {
+        // Process initial message if provided so users see the conversation when the UI starts.
+        if let Some(msg) = message {
+            self.process_message(msg).await?;
+        }
+        // Build and run the TUI. The TUI owns a _mutable reference_ to `self` while running, so we
+        // need to construct it first and then await its future.
+        let tui = tui::GooseTui::new(self)?;
+        tui.run().await
     }
 }
 
