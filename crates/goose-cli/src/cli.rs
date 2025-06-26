@@ -30,11 +30,25 @@ use goose_bench::runners::model_runner::ModelRunner;
 use std::io::Read;
 use std::path::PathBuf;
 
+// Sandbox support
+use crate::sandbox;
+
 #[derive(Parser)]
 #[command(author, version, display_name = "", about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    #[arg(
+        short = 's',
+        long = "sandbox",
+        num_args = 0..=1,
+        value_name = "METHOD",
+        env = "GOOSE_SANDBOX",
+        default_missing_value = "seatbelt",
+        help = "Enable sandboxing (optional methods: seatbelt, docker, podman). If provided without a value, defaults to 'seatbelt' on macOS.",
+    )]
+    sandbox: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -599,6 +613,9 @@ struct InputConfig {
 
 pub async fn cli() -> Result<()> {
     let cli = Cli::parse();
+
+    // Enter sandbox if requested
+    sandbox::maybe_enter_sandbox(cli.sandbox.clone())?;
 
     // Track the current directory in projects.json
     if let Err(e) = crate::project_tracker::update_project_tracker(None, None) {
