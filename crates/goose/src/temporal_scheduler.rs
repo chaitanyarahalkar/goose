@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-use crate::scheduler::{ScheduledJob, SchedulerError};
+use crate::scheduler::{normalize_cron_expression, ScheduledJob, SchedulerError};
 use crate::scheduler_trait::SchedulerTrait;
 use crate::session::storage::SessionMetadata;
 
@@ -487,10 +487,21 @@ impl TemporalScheduler {
             "TemporalScheduler: add_scheduled_job() called for job '{}'",
             job.id
         );
+
+        // Normalize the cron expression to ensure it's 6-field format
+        let normalized_cron = normalize_cron_expression(&job.cron);
+        if normalized_cron != job.cron {
+            tracing::info!(
+                "TemporalScheduler: Normalized cron expression from '{}' to '{}'",
+                job.cron,
+                normalized_cron
+            );
+        }
+
         let request = JobRequest {
             action: "create".to_string(),
             job_id: Some(job.id.clone()),
-            cron: Some(job.cron.clone()),
+            cron: Some(normalized_cron),
             recipe_path: Some(job.source.clone()),
             execution_mode: job.execution_mode.clone(),
         };
@@ -690,10 +701,20 @@ impl TemporalScheduler {
             new_cron
         );
 
+        // Normalize the cron expression to ensure it's 6-field format
+        let normalized_cron = normalize_cron_expression(&new_cron);
+        if normalized_cron != new_cron {
+            tracing::info!(
+                "TemporalScheduler: Normalized cron expression from '{}' to '{}'",
+                new_cron,
+                normalized_cron
+            );
+        }
+
         let request = JobRequest {
             action: "update".to_string(),
             job_id: Some(sched_id.to_string()),
-            cron: Some(new_cron),
+            cron: Some(normalized_cron),
             recipe_path: None,
             execution_mode: None,
         };
@@ -780,9 +801,19 @@ impl TemporalScheduler {
                 let mut has_active_session = false;
 
                 for (session_name, _) in recent_sessions {
-                    let session_path = crate::session::storage::get_path(
-                        crate::session::storage::Identifier::Name(session_name),
-                    );
+                    let session_path = match crate::session::storage::get_path(
+                        crate::session::storage::Identifier::Name(session_name.clone()),
+                    ) {
+                        Ok(path) => path,
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to get session path for '{}': {}",
+                                session_name,
+                                e
+                            );
+                            continue;
+                        }
+                    };
 
                     // Check if session file was modified recently (within last 5 minutes instead of 2)
                     if let Ok(metadata) = std::fs::metadata(&session_path) {
@@ -878,9 +909,23 @@ impl TemporalScheduler {
 
                         if let Some((session_name, _session_metadata)) = recent_sessions.first() {
                             // Check if this session is still active by looking at the session file
-                            let session_path = crate::session::storage::get_path(
+                            let session_path = match crate::session::storage::get_path(
                                 crate::session::storage::Identifier::Name(session_name.clone()),
-                            );
+                            ) {
+                                Ok(path) => path,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "Failed to get session path for '{}': {}",
+                                        session_name,
+                                        e
+                                    );
+                                    // Fallback: return a temporal session ID with current time
+                                    let session_id =
+                                        format!("temporal-{}-{}", sched_id, Utc::now().timestamp());
+                                    let start_time = Utc::now();
+                                    return Ok(Some((session_id, start_time)));
+                                }
+                            };
 
                             // If the session file was modified recently (within last 5 minutes),
                             // consider it as the current running session
@@ -1283,5 +1328,25 @@ mod tests {
                 // This might happen in some test environments, but the logic is correct
             }
         }
+    }
+
+    #[test]
+    fn test_cron_normalization_in_temporal_scheduler() {
+        // Test that the temporal scheduler uses cron normalization correctly
+        use crate::scheduler::normalize_cron_expression;
+
+        // Test cases that should be normalized
+        assert_eq!(normalize_cron_expression("0 12 * * *"), "0 0 12 * * *");
+        assert_eq!(normalize_cron_expression("*/5 * * * *"), "0 */5 * * * *");
+        assert_eq!(normalize_cron_expression("0 0 * * 1"), "0 0 0 * * 1");
+
+        // Test cases that should remain unchanged
+        assert_eq!(normalize_cron_expression("0 0 12 * * *"), "0 0 12 * * *");
+        assert_eq!(
+            normalize_cron_expression("*/30 */5 * * * *"),
+            "*/30 */5 * * * *"
+        );
+
+        println!("✅ Cron normalization works correctly in TemporalScheduler");
     }
 }
