@@ -1,0 +1,57 @@
+(version 1)
+
+;; Permissive Open Profile
+;; Allows most operations with write restrictions outside project directory
+;; Network access is permitted
+
+(deny default)
+
+;; Allow all process operations
+(allow process*)
+
+;; Allow network access
+(allow network*)
+
+;; Allow file operations on system directories (read-only)
+(allow file-read* 
+    (subpath "/System")
+    (subpath "/Library")
+    (subpath "/usr")
+    (subpath "/bin")
+    (subpath "/sbin")
+    (subpath "/opt")
+    (subpath "/Applications"))
+
+;; Allow read access to user home directory
+(allow file-read* (subpath (param "home_dir")))
+
+;; Allow full access to project directory
+(allow file-read* file-write* file-write-create file-write-data 
+    (subpath (param "project_dir")))
+
+;; Allow temporary directory access
+(allow file-read* file-write* file-write-create 
+    (subpath "/tmp")
+    (subpath "/var/tmp")
+    (subpath "/private/tmp")
+    (subpath "/private/var/tmp"))
+
+;; Allow access to common development tools
+(allow file-read* file-write*
+    (subpath "/dev/null")
+    (subpath "/dev/zero")
+    (subpath "/dev/random")
+    (subpath "/dev/urandom"))
+
+;; Allow terminal operations
+(allow file-read* file-write*
+    (regex #"^/dev/tty.*"))
+
+;; Allow IPC and signal operations
+(allow ipc-posix-shm*)
+(allow signal)
+(allow sysctl-read)
+
+;; Allow mach operations needed for process spawning
+(allow mach-lookup)
+(allow mach-register)

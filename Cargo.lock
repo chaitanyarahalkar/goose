@@ -3623,6 +3623,7 @@ dependencies = [
  "async-trait",
  "base64 0.21.7",
  "chrono",
+ "dirs 5.0.1",
  "docx-rs",
  "etcetera",
  "google-apis-common",

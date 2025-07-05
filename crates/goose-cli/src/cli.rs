@@ -350,6 +350,25 @@ enum Command {
             value_delimiter = ','
         )]
         builtins: Vec<String>,
+
+        /// Enable sandboxing for shell commands
+        #[arg(
+            long = "sandbox",
+            value_name = "METHOD",
+            help = "Enable sandboxing (optional method: seatbelt, docker, podman)",
+            long_help = "Enable sandboxing to isolate shell commands from the host system. On macOS, uses seatbelt by default. Optionally specify a method: seatbelt (macOS only), docker, or podman."
+        )]
+        sandbox: Option<Option<String>>,
+
+        /// Seatbelt sandbox profile (macOS only)
+        #[arg(
+            long = "sandbox-profile",
+            value_name = "PROFILE",
+            help = "Seatbelt sandbox profile (permissive-open, permissive-closed, restrictive-open, restrictive-closed)",
+            long_help = "Choose the security profile for seatbelt sandboxing on macOS:\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions",
+            requires = "sandbox"
+        )]
+        sandbox_profile: Option<String>,
     },
 
     /// Open the last project directory
@@ -546,6 +565,26 @@ enum Command {
             action = clap::ArgAction::Append
         )]
         additional_sub_recipes: Vec<String>,
+
+        /// Enable sandboxing for shell commands
+        #[arg(
+            long = "sandbox",
+            value_name = "METHOD",
+            help = "Enable sandboxing (optional method: seatbelt, docker, podman)",
+            long_help = "Enable sandboxing to isolate shell commands from the host system. On macOS, uses seatbelt by default. Optionally specify a method: seatbelt (macOS only), docker, or podman.",
+            conflicts_with = "interactive"
+        )]
+        sandbox: Option<Option<String>>,
+
+        /// Seatbelt sandbox profile (macOS only)
+        #[arg(
+            long = "sandbox-profile",
+            value_name = "PROFILE",
+            help = "Seatbelt sandbox profile (permissive-open, permissive-closed, restrictive-open, restrictive-closed)",
+            long_help = "Choose the security profile for seatbelt sandboxing on macOS:\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions",
+            requires = "sandbox"
+        )]
+        sandbox_profile: Option<String>,
     },
 
     /// Recipe utilities for validation and deeplinking
@@ -657,6 +696,8 @@ pub async fn cli() -> Result<()> {
             extensions,
             remote_extensions,
             builtins,
+            sandbox: _,
+            sandbox_profile: _,
         }) => {
             return match command {
                 Some(SessionCommand::List {
@@ -761,6 +802,8 @@ pub async fn cli() -> Result<()> {
             scheduled_job_id,
             quiet,
             additional_sub_recipes,
+            sandbox: _,
+            sandbox_profile: _,
         }) => {
             let (input_config, session_settings, sub_recipes, final_output_response) = match (
                 instructions,
