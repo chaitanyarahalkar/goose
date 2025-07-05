@@ -1,0 +1,7 @@
+(version 1)
+
+;; Simple test profile that blocks network
+(deny default)
+(allow process*)
+(allow file*)
+(deny network*)

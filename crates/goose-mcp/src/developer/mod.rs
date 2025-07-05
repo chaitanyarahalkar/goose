@@ -1,5 +1,6 @@
 mod editor_models;
 mod lang;
+mod sandbox;
 mod shell;
 
 use anyhow::Result;
@@ -16,7 +17,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::Command,
     sync::mpsc,
 };
 use url::Url;
@@ -39,6 +39,7 @@ use mcp_server::Router;
 use mcp_core::role::Role;
 
 use self::editor_models::{create_editor_model, EditorModel};
+use self::sandbox::{parse_sandbox_config_from_env, SandboxWrapper};
 use self::shell::{expand_path, get_shell_config, is_absolute_path, normalize_line_endings};
 use indoc::indoc;
 use std::process::Stdio;
@@ -557,14 +558,20 @@ impl DeveloperRouter {
         // Get platform-specific shell configuration
         let shell_config = get_shell_config();
 
-        // Execute the command using platform-specific shell
-        let mut child = Command::new(&shell_config.executable)
+        // Get sandbox configuration from environment
+        let sandbox_config = parse_sandbox_config_from_env();
+        
+        // Create sandbox wrapper and execute command
+        let sandbox_wrapper = SandboxWrapper::new(sandbox_config)
+            .map_err(|e| ToolError::ExecutionError(format!("Failed to create sandbox: {}", e)))?;
+
+        let mut child = sandbox_wrapper
+            .wrap_command(&shell_config, command)
+            .map_err(|e| ToolError::ExecutionError(format!("Failed to wrap command with sandbox: {}", e)))?
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
             .kill_on_drop(true)
-            .args(&shell_config.args)
-            .arg(command)
             .spawn()
             .map_err(|e| ToolError::ExecutionError(e.to_string()))?;
 

@@ -44,6 +44,10 @@ debug_*.txt
 .docusaurus
 .cache-loader
 
+# AI Tools
+.claude/
+.gemini/
+
 # Benchmark paths
 benchmark-*
 benchconf.json
