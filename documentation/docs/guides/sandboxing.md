@@ -98,6 +98,28 @@ Goose includes four built-in Seatbelt profiles with different security levels:
 
 ### Docker/Podman Configuration
 
+:::warning Profile Behavior in Docker/Podman
+**Important**: The four Seatbelt profiles have **limited effect** in Docker/Podman mode:
+
+| Profile | Docker Behavior | Network | File System | Other Restrictions |
+|---------|-----------------|---------|-------------|-------------------|
+| `permissive-open` | `--network bridge` | ✅ Allowed | Same for all profiles | Same for all profiles |
+| `permissive-closed` | `--network none` | ❌ Blocked | Same for all profiles | Same for all profiles |
+| `restrictive-open` | `--network bridge` | ✅ Allowed | Same for all profiles | Same for all profiles |
+| `restrictive-closed` | `--network none` | ❌ Blocked | Same for all profiles | Same for all profiles |
+
+**Key Points:**
+- **Network isolation**: Only `open` vs `closed` matters (`permissive-open` = `restrictive-open`)
+- **File system**: All profiles mount the same volumes (project + home directory)
+- **Security**: All profiles use identical container security settings
+
+**Effectively, you have 2 Docker profiles:**
+- **Network allowed**: `permissive-open` or `restrictive-open` (identical)
+- **Network blocked**: `permissive-closed` or `restrictive-closed` (identical)
+
+The full granular control from Seatbelt profiles is **only available on macOS** with `--sandbox=seatbelt`.
+:::
+
 #### Automatic Image Detection
 
 Goose automatically detects your project type and uses optimized container images:
@@ -154,15 +176,31 @@ SANDBOX_UID=0 SANDBOX_GID=0 goose run --sandbox=docker -t "apt-get update"
 
 #### Profile Examples
 
+**Seatbelt (macOS only) - Full granular control:**
 ```bash
 # Default profile (permissive-open) - allows network, restricts writes
-goose run --sandbox -t "curl -I google.com && touch myfile.txt"
+goose run --sandbox=seatbelt -t "curl -I google.com && touch myfile.txt"
 
 # Block network access but allow system file reading
-goose run --sandbox --sandbox-profile=permissive-closed -t "ls /usr/bin | head -5"
+goose run --sandbox=seatbelt --sandbox-profile=permissive-closed -t "ls /usr/bin | head -5"
 
 # Maximum restrictions - no network, minimal file access
-goose run --sandbox --sandbox-profile=restrictive-closed -t "echo 'Hello World'"
+goose run --sandbox=seatbelt --sandbox-profile=restrictive-closed -t "echo 'Hello World'"
+```
+
+**Docker/Podman - Network control only:**
+```bash
+# These are IDENTICAL (both allow network):
+goose run --sandbox=docker --sandbox-profile=permissive-open -t "curl -I google.com"
+goose run --sandbox=docker --sandbox-profile=restrictive-open -t "curl -I google.com"
+
+# These are IDENTICAL (both block network):
+goose run --sandbox=docker --sandbox-profile=permissive-closed -t "echo 'Network blocked'"
+goose run --sandbox=docker --sandbox-profile=restrictive-closed -t "echo 'Network blocked'"
+
+# Simplified approach - just use open/closed:
+goose run --sandbox=docker --sandbox-profile=permissive-open -t "apt-get update"     # Network allowed
+goose run --sandbox=docker --sandbox-profile=permissive-closed -t "echo 'Offline'"  # Network blocked
 ```
 
 ## Usage Examples
