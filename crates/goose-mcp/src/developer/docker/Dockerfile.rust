@@ -1,0 +1,30 @@
+# Rust-specific Goose sandbox image
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install common Rust tools
+RUN cargo install cargo-watch cargo-edit cargo-audit
+
+# Set up directories
+RUN mkdir -p /workspace /home/goose
+RUN useradd -u 1000 -m -s /bin/bash goose && \
+    chown -R goose:goose /home/goose
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

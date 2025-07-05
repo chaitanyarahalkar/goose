@@ -3640,6 +3640,7 @@ dependencies = [
  "keyring",
  "kill_tree",
  "lazy_static",
+ "libc",
  "lopdf",
  "mcp-core",
  "mcp-server",

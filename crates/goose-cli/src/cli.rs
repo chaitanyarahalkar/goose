@@ -677,8 +677,8 @@ pub async fn cli() -> Result<()> {
             extensions,
             remote_extensions,
             builtins,
-            sandbox: _,
-            sandbox_profile: _,
+            sandbox,
+            sandbox_profile,
         }) => {
             return match command {
                 Some(SessionCommand::List {
@@ -711,6 +711,21 @@ pub async fn cli() -> Result<()> {
                     Ok(())
                 }
                 None => {
+                    // Set sandbox environment variables from CLI arguments
+                    if let Some(sandbox_method) = &sandbox {
+                        match sandbox_method {
+                            Some(method) => {
+                                std::env::set_var("GOOSE_SANDBOX", method);
+                            }
+                            None => {
+                                std::env::set_var("GOOSE_SANDBOX", "true");
+                            }
+                        }
+                    }
+                    if let Some(profile) = &sandbox_profile {
+                        std::env::set_var("SEATBELT_PROFILE", profile);
+                    }
+
                     // Run session command by default
                     let mut session: crate::Session = build_session(SessionBuilderConfig {
                         identifier: identifier.map(extract_identifier),
@@ -781,8 +796,8 @@ pub async fn cli() -> Result<()> {
             scheduled_job_id,
             quiet,
             additional_sub_recipes,
-            sandbox: _,
-            sandbox_profile: _,
+            sandbox,
+            sandbox_profile,
         }) => {
             let (input_config, session_settings, sub_recipes, final_output_response) = match (
                 instructions,
@@ -856,6 +871,21 @@ pub async fn cli() -> Result<()> {
                     std::process::exit(1);
                 }
             };
+
+            // Set sandbox environment variables from CLI arguments
+            if let Some(sandbox_method) = &sandbox {
+                match sandbox_method {
+                    Some(method) => {
+                        std::env::set_var("GOOSE_SANDBOX", method);
+                    }
+                    None => {
+                        std::env::set_var("GOOSE_SANDBOX", "true");
+                    }
+                }
+            }
+            if let Some(profile) = &sandbox_profile {
+                std::env::set_var("SEATBELT_PROFILE", profile);
+            }
 
             let mut session = build_session(SessionBuilderConfig {
                 identifier: identifier.map(extract_identifier),

@@ -560,14 +560,16 @@ impl DeveloperRouter {
 
         // Get sandbox configuration from environment
         let sandbox_config = parse_sandbox_config_from_env();
-        
+
         // Create sandbox wrapper and execute command
         let sandbox_wrapper = SandboxWrapper::new(sandbox_config)
             .map_err(|e| ToolError::ExecutionError(format!("Failed to create sandbox: {}", e)))?;
 
         let mut child = sandbox_wrapper
             .wrap_command(&shell_config, command)
-            .map_err(|e| ToolError::ExecutionError(format!("Failed to wrap command with sandbox: {}", e)))?
+            .map_err(|e| {
+                ToolError::ExecutionError(format!("Failed to wrap command with sandbox: {}", e))
+            })?
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::null())
