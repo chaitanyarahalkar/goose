@@ -1,6 +1,6 @@
 mod editor_models;
 mod lang;
-mod sandbox;
+pub mod sandbox;
 mod shell;
 
 use anyhow::Result;
@@ -559,7 +559,8 @@ impl DeveloperRouter {
         let shell_config = get_shell_config();
 
         // Get sandbox configuration from environment
-        let sandbox_config = parse_sandbox_config_from_env();
+        let sandbox_config = parse_sandbox_config_from_env()
+            .map_err(|e| ToolError::ExecutionError(format!("Sandbox configuration error: {}", e)))?;
 
         // Create sandbox wrapper and execute command
         let sandbox_wrapper = SandboxWrapper::new(sandbox_config)

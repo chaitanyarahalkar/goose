@@ -351,12 +351,12 @@ enum Command {
         )]
         sandbox: Option<Option<String>>,
 
-        /// Seatbelt sandbox profile (macOS only)
+        /// Sandbox profile
         #[arg(
             long = "sandbox-profile",
             value_name = "PROFILE",
-            help = "Seatbelt sandbox profile (permissive-open, permissive-closed, restrictive-open, restrictive-closed)",
-            long_help = "Choose the security profile for seatbelt sandboxing on macOS:\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions",
+            help = "Sandbox profile: permissive-open [write+net], permissive-closed [write only], restrictive-open [strict+net], restrictive-closed [max security], permissive [net ok], restrictive [no net], /path/to/custom.sb",
+            long_help = "Choose the security profile for sandboxing:\n  Seatbelt profiles (macOS only):\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions\n  Container profiles (Docker/Podman):\n  - permissive: Network allowed\n  - restrictive: Network blocked\n  Custom profiles (Seatbelt only):\n  - /path/to/custom.sb: Path to your own Seatbelt profile file",
             requires = "sandbox"
         )]
         sandbox_profile: Option<String>,
@@ -558,12 +558,12 @@ enum Command {
         )]
         sandbox: Option<Option<String>>,
 
-        /// Seatbelt sandbox profile (macOS only)
+        /// Sandbox profile
         #[arg(
             long = "sandbox-profile",
             value_name = "PROFILE",
-            help = "Seatbelt sandbox profile (permissive-open, permissive-closed, restrictive-open, restrictive-closed)",
-            long_help = "Choose the security profile for seatbelt sandboxing on macOS:\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions",
+            help = "Sandbox profile: permissive-open [write+net], permissive-closed [write only], restrictive-open [strict+net], restrictive-closed [max security], permissive [net ok], restrictive [no net], /path/to/custom.sb",
+            long_help = "Choose the security profile for sandboxing:\n  Seatbelt profiles (macOS only):\n  - permissive-open: Write restrictions, network allowed (default)\n  - permissive-closed: Write restrictions, no network\n  - restrictive-open: Strict restrictions, network allowed\n  - restrictive-closed: Maximum restrictions\n  Container profiles (Docker/Podman):\n  - permissive: Network allowed\n  - restrictive: Network blocked\n  Custom profiles (Seatbelt only):\n  - /path/to/custom.sb: Path to your own Seatbelt profile file",
             requires = "sandbox"
         )]
         sandbox_profile: Option<String>,
@@ -723,6 +723,56 @@ pub async fn cli() -> Result<()> {
                         }
                     }
                     if let Some(profile) = &sandbox_profile {
+                        // Validate the profile before setting the environment variable
+                        use goose_mcp::developer::sandbox::SeatbeltProfile;
+                        use std::str::FromStr;
+                        match SeatbeltProfile::from_str(profile) {
+                            Ok(parsed_profile) => {
+                                let sandbox_method = sandbox.as_ref()
+                                    .and_then(|s| s.as_ref())
+                                    .map_or("default", |v| v);
+                                
+                                // Check profile compatibility with sandbox method
+                                match parsed_profile {
+                                    SeatbeltProfile::Custom(_) => {
+                                        if sandbox_method != "seatbelt" && sandbox_method != "default" {
+                                            eprintln!("Error: Custom .sb profile files are only supported with Seatbelt sandboxing on macOS.");
+                                            eprintln!("       Available options:");
+                                            eprintln!("       - Use --sandbox=seatbelt with your custom profile (macOS only)");
+                                            eprintln!("       - Use container profiles: permissive, restrictive");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                    SeatbeltProfile::Permissive | SeatbeltProfile::Restrictive => {
+                                        if sandbox_method == "seatbelt" {
+                                            eprintln!("Error: Container profiles 'permissive' and 'restrictive' are only supported with Docker/Podman sandboxing.");
+                                            eprintln!("       Available options:");
+                                            eprintln!("       - Use --sandbox=docker or --sandbox=podman with container profiles: permissive, restrictive");
+                                            eprintln!("       - Use Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                    SeatbeltProfile::PermissiveOpen | SeatbeltProfile::PermissiveClosed | 
+                                    SeatbeltProfile::RestrictiveOpen | SeatbeltProfile::RestrictiveClosed => {
+                                        if sandbox_method == "docker" || sandbox_method == "podman" {
+                                            eprintln!("Error: Traditional Seatbelt profiles are only supported with Seatbelt sandboxing on macOS.");
+                                            eprintln!("       Docker and Podman sandboxing use simplified container profiles.");
+                                            eprintln!("       Available options:");
+                                            eprintln!("       - Use --sandbox=seatbelt with Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed");
+                                            eprintln!("       - Use container profiles: permissive (network allowed), restrictive (network blocked)");
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                    _ => {
+                                        // Custom profiles handled above
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error: Invalid --sandbox-profile argument: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
                         std::env::set_var("SEATBELT_PROFILE", profile);
                     }
 
@@ -884,6 +934,56 @@ pub async fn cli() -> Result<()> {
                 }
             }
             if let Some(profile) = &sandbox_profile {
+                // Validate the profile before setting the environment variable
+                use goose_mcp::developer::sandbox::SeatbeltProfile;
+                use std::str::FromStr;
+                match SeatbeltProfile::from_str(profile) {
+                    Ok(parsed_profile) => {
+                        let sandbox_method = sandbox.as_ref()
+                            .and_then(|s| s.as_ref())
+                            .map_or("default", |v| v);
+                        
+                        // Check profile compatibility with sandbox method
+                        match parsed_profile {
+                            SeatbeltProfile::Custom(_) => {
+                                if sandbox_method != "seatbelt" && sandbox_method != "default" {
+                                    eprintln!("Error: Custom .sb profile files are only supported with Seatbelt sandboxing on macOS.");
+                                    eprintln!("       Available options:");
+                                    eprintln!("       - Use --sandbox=seatbelt with your custom profile (macOS only)");
+                                    eprintln!("       - Use container profiles: permissive, restrictive");
+                                    std::process::exit(1);
+                                }
+                            }
+                            SeatbeltProfile::Permissive | SeatbeltProfile::Restrictive => {
+                                if sandbox_method == "seatbelt" {
+                                    eprintln!("Error: Container profiles 'permissive' and 'restrictive' are only supported with Docker/Podman sandboxing.");
+                                    eprintln!("       Available options:");
+                                    eprintln!("       - Use --sandbox=docker or --sandbox=podman with container profiles: permissive, restrictive");
+                                    eprintln!("       - Use Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed");
+                                    std::process::exit(1);
+                                }
+                            }
+                            SeatbeltProfile::PermissiveOpen | SeatbeltProfile::PermissiveClosed | 
+                            SeatbeltProfile::RestrictiveOpen | SeatbeltProfile::RestrictiveClosed => {
+                                if sandbox_method == "docker" || sandbox_method == "podman" {
+                                    eprintln!("Error: Traditional Seatbelt profiles are only supported with Seatbelt sandboxing on macOS.");
+                                    eprintln!("       Docker and Podman sandboxing use simplified container profiles.");
+                                    eprintln!("       Available options:");
+                                    eprintln!("       - Use --sandbox=seatbelt with Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed");
+                                    eprintln!("       - Use container profiles: permissive (network allowed), restrictive (network blocked)");
+                                    std::process::exit(1);
+                                }
+                            }
+                            _ => {
+                                // Custom profiles handled above
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error: Invalid --sandbox-profile argument: {}", e);
+                        std::process::exit(1);
+                    }
+                }
                 std::env::set_var("SEATBELT_PROFILE", profile);
             }
 

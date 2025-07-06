@@ -96,6 +96,44 @@ Goose includes four built-in Seatbelt profiles with different security levels:
 | `restrictive-open` | ✅ Allowed | Minimal system access, write to project only | Stricter security with network |
 | `restrictive-closed` | ❌ Blocked | Minimal system access, write to project only | **Maximum security** - Isolated execution |
 
+#### Custom Seatbelt Profiles
+
+You can also create your own custom Seatbelt profile files (`.sb` extension) for fine-grained control:
+
+```bash
+# Use a custom profile file
+goose run --sandbox=seatbelt --sandbox-profile=/path/to/custom.sb -t "your command"
+
+# Set via environment variable
+export SEATBELT_PROFILE=/path/to/custom.sb
+goose run --sandbox=seatbelt -t "your command"
+```
+
+**Custom Profile Requirements:**
+- Must have `.sb` file extension
+- Must contain valid Seatbelt syntax
+- File must be readable and non-empty
+- Supports parameter substitution for `project_dir` and `home_dir`
+
+**Example custom profile:**
+```scheme
+(version 1)
+(allow default)
+(deny network*)
+
+;; Allow access to project directory
+(allow file-read* file-write*
+    (subpath (param "project_dir")))
+
+;; Allow read-only access to home directory
+(allow file-read*
+    (subpath (param "home_dir")))
+```
+
+:::warning Custom Profiles Only for Seatbelt
+Custom `.sb` profile files are **only supported with Seatbelt sandboxing on macOS**. Docker and Podman sandboxing use the built-in profile mapping system and do not support custom profiles.
+:::
+
 ### Docker/Podman Configuration
 
 :::warning Profile Behavior in Docker/Podman
@@ -186,6 +224,9 @@ goose run --sandbox=seatbelt --sandbox-profile=permissive-closed -t "ls /usr/bin
 
 # Maximum restrictions - no network, minimal file access
 goose run --sandbox=seatbelt --sandbox-profile=restrictive-closed -t "echo 'Hello World'"
+
+# Custom profile from your own .sb file
+goose run --sandbox=seatbelt --sandbox-profile=/path/to/custom.sb -t "your command"
 ```
 
 **Docker/Podman - Network control only:**

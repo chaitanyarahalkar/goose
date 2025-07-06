@@ -23,10 +23,15 @@ pub enum SandboxMethod {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SeatbeltProfile {
+    // Traditional Seatbelt profiles (macOS only)
     PermissiveOpen,
     PermissiveClosed,
     RestrictiveOpen,
     RestrictiveClosed,
+    Custom(PathBuf),
+    // Simplified container profiles (Docker/Podman only)
+    Permissive,   // Network allowed
+    Restrictive,  // Network blocked
 }
 
 impl Default for SandboxConfig {
@@ -58,22 +63,51 @@ impl FromStr for SeatbeltProfile {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().replace('-', "_").as_str() {
+            // Traditional Seatbelt profiles
             "permissive_open" | "permissiveopen" => Ok(SeatbeltProfile::PermissiveOpen),
             "permissive_closed" | "permissiveclosed" => Ok(SeatbeltProfile::PermissiveClosed),
             "restrictive_open" | "restrictiveopen" => Ok(SeatbeltProfile::RestrictiveOpen),
             "restrictive_closed" | "restrictiveclosed" => Ok(SeatbeltProfile::RestrictiveClosed),
-            _ => Err(format!("Unknown seatbelt profile: {}", s)),
+            // Simplified container profiles
+            "permissive" => Ok(SeatbeltProfile::Permissive),
+            "restrictive" => Ok(SeatbeltProfile::Restrictive),
+            _ => {
+                // Check if it's a file path
+                let path = PathBuf::from(s);
+                if path.exists() {
+                    // Validate it's a .sb file
+                    if let Some(extension) = path.extension() {
+                        if extension == "sb" {
+                            return Ok(SeatbeltProfile::Custom(path));
+                        } else {
+                            return Err(format!(
+                                "Custom profile file must have .sb extension, got: {}", 
+                                extension.to_string_lossy()
+                            ));
+                        }
+                    } else {
+                        return Err("Custom profile file must have .sb extension".to_string());
+                    }
+                } else {
+                    return Err(format!(
+                        "Unknown sandbox profile '{}'. Available profiles:\n  Seatbelt (macOS): permissive-open, permissive-closed, restrictive-open, restrictive-closed\n  Container (Docker/Podman): permissive, restrictive\n  Custom: path to existing .sb file", 
+                        s
+                    ));
+                }
+            }
         }
     }
 }
 
 impl SeatbeltProfile {
-    fn profile_filename(&self) -> &'static str {
+    fn profile_filename(&self) -> Option<&'static str> {
         match self {
-            SeatbeltProfile::PermissiveOpen => "permissive-open.sb",
-            SeatbeltProfile::PermissiveClosed => "permissive-closed.sb",
-            SeatbeltProfile::RestrictiveOpen => "restrictive-open.sb",
-            SeatbeltProfile::RestrictiveClosed => "restrictive-closed.sb",
+            SeatbeltProfile::PermissiveOpen => Some("permissive-open.sb"),
+            SeatbeltProfile::PermissiveClosed => Some("permissive-closed.sb"),
+            SeatbeltProfile::RestrictiveOpen => Some("restrictive-open.sb"),
+            SeatbeltProfile::RestrictiveClosed => Some("restrictive-closed.sb"),
+            SeatbeltProfile::Custom(_) => None, // Custom profiles use their own paths
+            SeatbeltProfile::Permissive | SeatbeltProfile::Restrictive => None, // Container profiles don't use .sb files
         }
     }
 }
@@ -98,7 +132,46 @@ impl SandboxWrapper {
                         std::env::consts::OS
                     ));
                 }
-                _ => {} // Docker and Podman work on all platforms
+                SandboxMethod::Docker | SandboxMethod::Podman => {
+                    // Check if invalid profiles are being used with Docker/Podman
+                    match config.profile {
+                        SeatbeltProfile::Custom(_) => {
+                            return Err(format!(
+                                "Custom .sb profile files are only supported with Seatbelt sandboxing on macOS.\n\
+                                 Docker and Podman sandboxing use container profiles only.\n\
+                                 Available options:\n\
+                                 - Use --sandbox=seatbelt with your custom profile (macOS only)\n\
+                                 - Use container profiles: permissive, restrictive"
+                            ));
+                        }
+                        SeatbeltProfile::PermissiveOpen | SeatbeltProfile::PermissiveClosed | 
+                        SeatbeltProfile::RestrictiveOpen | SeatbeltProfile::RestrictiveClosed => {
+                            return Err(format!(
+                                "Traditional Seatbelt profiles are only supported with Seatbelt sandboxing on macOS.\n\
+                                 Docker and Podman sandboxing use simplified container profiles.\n\
+                                 Available options:\n\
+                                 - Use --sandbox=seatbelt with Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed\n\
+                                 - Use container profiles: permissive (network allowed), restrictive (network blocked)"
+                            ));
+                        }
+                        SeatbeltProfile::Permissive | SeatbeltProfile::Restrictive => {
+                            // These are the correct profiles for Docker/Podman
+                        }
+                    }
+                }
+                SandboxMethod::Seatbelt => {
+                    // Check if container-specific profiles are being used with Seatbelt
+                    if matches!(config.profile, SeatbeltProfile::Permissive | SeatbeltProfile::Restrictive) {
+                        return Err(format!(
+                            "Container profiles 'permissive' and 'restrictive' are only supported with Docker/Podman sandboxing.\n\
+                             Seatbelt sandboxing uses different profiles.\n\
+                             Available options:\n\
+                             - Use --sandbox=docker or --sandbox=podman with container profiles: permissive, restrictive\n\
+                             - Use Seatbelt profiles: permissive-open, permissive-closed, restrictive-open, restrictive-closed"
+                        ));
+                    }
+                }
+                _ => {} // Other methods are fine
             }
         }
 
@@ -178,29 +251,98 @@ impl SandboxWrapper {
     }
 
     fn get_seatbelt_profile_path(&self) -> Result<PathBuf, String> {
-        // Get the path to the profile file embedded in the binary
-        let profile_filename = self.config.profile.profile_filename();
+        match &self.config.profile {
+            SeatbeltProfile::Custom(custom_path) => {
+                // Validate the custom profile file
+                self.validate_custom_profile(custom_path)?;
+                Ok(custom_path.clone())
+            }
+            _ => {
+                // Get the path to the built-in profile file
+                let profile_filename = self.config.profile.profile_filename()
+                    .ok_or("Internal error: built-in profile should have filename")?;
 
-        // For now, use profiles from the source directory
-        // In a production build, these would be embedded as resources
-        let mut profile_path =
-            env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
+                // For now, use profiles from the source directory
+                // In a production build, these would be embedded as resources
+                let mut profile_path = env::current_dir()
+                    .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
-        profile_path.push("crates");
-        profile_path.push("goose-mcp");
-        profile_path.push("src");
-        profile_path.push("developer");
-        profile_path.push("profiles");
-        profile_path.push(profile_filename);
+                profile_path.push("crates");
+                profile_path.push("goose-mcp");
+                profile_path.push("src");
+                profile_path.push("developer");
+                profile_path.push("profiles");
+                profile_path.push(profile_filename);
 
+                if !profile_path.exists() {
+                    return Err(format!(
+                        "Built-in seatbelt profile not found: {}",
+                        profile_path.display()
+                    ));
+                }
+
+                Ok(profile_path)
+            }
+        }
+    }
+
+    fn validate_custom_profile(&self, profile_path: &PathBuf) -> Result<(), String> {
+        // Check if file exists
         if !profile_path.exists() {
             return Err(format!(
-                "Seatbelt profile not found: {}",
+                "Custom seatbelt profile file not found: {}",
                 profile_path.display()
             ));
         }
 
-        Ok(profile_path)
+        // Check if it's a file (not a directory)
+        if !profile_path.is_file() {
+            return Err(format!(
+                "Custom seatbelt profile path is not a file: {}",
+                profile_path.display()
+            ));
+        }
+
+        // Check file extension
+        match profile_path.extension() {
+            Some(ext) if ext == "sb" => {},
+            Some(ext) => {
+                return Err(format!(
+                    "Custom seatbelt profile must have .sb extension, got: {}",
+                    ext.to_string_lossy()
+                ));
+            }
+            None => {
+                return Err("Custom seatbelt profile must have .sb extension".to_string());
+            }
+        }
+
+        // Try to read the file to ensure it's accessible
+        match std::fs::read_to_string(profile_path) {
+            Ok(content) => {
+                // Basic validation: ensure it's not empty and looks like a seatbelt profile
+                if content.trim().is_empty() {
+                    return Err("Custom seatbelt profile file is empty".to_string());
+                }
+                
+                // Check for basic seatbelt syntax (should contain at least one rule)
+                if !content.contains("(") || !content.contains(")") {
+                    return Err(format!(
+                        "Custom seatbelt profile file '{}' does not appear to contain valid seatbelt syntax",
+                        profile_path.display()
+                    ));
+                }
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to read custom seatbelt profile file '{}': {}",
+                    profile_path.display(),
+                    e
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn create_docker_command(
@@ -351,8 +493,17 @@ impl SandboxWrapper {
 
     fn get_docker_network_mode(&self) -> String {
         match &self.config.profile {
+            // Traditional Seatbelt profiles (shouldn't be used with Docker, but handle gracefully)
             SeatbeltProfile::PermissiveOpen | SeatbeltProfile::RestrictiveOpen => "bridge".to_string(),
             SeatbeltProfile::PermissiveClosed | SeatbeltProfile::RestrictiveClosed => "none".to_string(),
+            SeatbeltProfile::Custom(_) => {
+                // Custom profiles are only for macOS Seatbelt, not Docker
+                // If somehow we get here with Docker, default to no network for security
+                "none".to_string()
+            }
+            // Container-specific profiles (primary profiles for Docker/Podman)
+            SeatbeltProfile::Permissive => "bridge".to_string(),   // Network allowed
+            SeatbeltProfile::Restrictive => "none".to_string(),    // Network blocked
         }
     }
 
@@ -399,10 +550,20 @@ impl SandboxWrapper {
             SandboxMethod::None => "Sandboxing disabled".to_string(),
             SandboxMethod::Seatbelt => {
                 if self.is_sandboxing_available() {
-                    format!(
-                        "Seatbelt sandboxing enabled (profile: {:?})",
-                        self.config.profile
-                    )
+                    match &self.config.profile {
+                        SeatbeltProfile::Custom(path) => {
+                            format!(
+                                "Seatbelt sandboxing enabled (custom profile: {})",
+                                path.display()
+                            )
+                        }
+                        _ => {
+                            format!(
+                                "Seatbelt sandboxing enabled (profile: {:?})",
+                                self.config.profile
+                            )
+                        }
+                    }
                 } else {
                     "Seatbelt sandboxing not available on this system".to_string()
                 }
@@ -426,7 +587,7 @@ impl SandboxWrapper {
 }
 
 /// Parse sandbox configuration from environment variables and CLI arguments
-pub fn parse_sandbox_config_from_env() -> SandboxConfig {
+pub fn parse_sandbox_config_from_env() -> Result<SandboxConfig, String> {
     parse_sandbox_config(None, None)
 }
 
@@ -434,7 +595,7 @@ pub fn parse_sandbox_config_from_env() -> SandboxConfig {
 pub fn parse_sandbox_config(
     sandbox_arg: Option<Option<String>>,
     profile_arg: Option<String>,
-) -> SandboxConfig {
+) -> Result<SandboxConfig, String> {
     let mut config = SandboxConfig::default();
 
     // Check environment variables first
@@ -455,8 +616,9 @@ pub fn parse_sandbox_config(
 
     // Check for seatbelt profile override from env
     if let Ok(profile_str) = env::var("SEATBELT_PROFILE") {
-        if let Ok(profile) = SeatbeltProfile::from_str(&profile_str) {
-            config.profile = profile;
+        match SeatbeltProfile::from_str(&profile_str) {
+            Ok(profile) => config.profile = profile,
+            Err(e) => return Err(format!("Invalid SEATBELT_PROFILE environment variable: {}", e)),
         }
     }
 
@@ -484,12 +646,13 @@ pub fn parse_sandbox_config(
 
     // CLI profile argument overrides environment
     if let Some(profile_str) = profile_arg {
-        if let Ok(profile) = SeatbeltProfile::from_str(&profile_str) {
-            config.profile = profile;
+        match SeatbeltProfile::from_str(&profile_str) {
+            Ok(profile) => config.profile = profile,
+            Err(e) => return Err(format!("Invalid --sandbox-profile argument: {}", e)),
         }
     }
 
-    config
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -528,6 +691,12 @@ mod tests {
             SeatbeltProfile::RestrictiveClosed
         );
         assert!(SeatbeltProfile::from_str("invalid").is_err());
+        
+        // Test that non-existent file path returns error
+        assert!(SeatbeltProfile::from_str("/nonexistent/path.sb").is_err());
+        
+        // Test that file without .sb extension returns error
+        assert!(SeatbeltProfile::from_str("/tmp/test.txt").is_err());
     }
 
     #[test]
