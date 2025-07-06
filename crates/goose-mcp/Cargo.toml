@@ -62,7 +62,10 @@ utoipa = { version = "4.1", optional = true }
 hyper = "1"
 serde_with = "3"
 which = "6.0"
+dirs = "5.0"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 serial_test = "3.0.0"

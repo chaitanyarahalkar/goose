@@ -8,7 +8,7 @@ pub static APP_STRATEGY: Lazy<AppStrategyArgs> = Lazy::new(|| AppStrategyArgs {
 });
 
 pub mod computercontroller;
-mod developer;
+pub mod developer;
 pub mod google_drive;
 mod jetbrains;
 mod memory;

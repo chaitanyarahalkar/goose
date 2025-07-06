@@ -1,0 +1,30 @@
+# Node.js-specific Goose sandbox image
+FROM node:18-bullseye-slim
+
+# Install system utilities
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    wget \
+    build-essential \
+    python3 \
+    python3-pip \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install global Node.js tools
+RUN npm install -g \
+    typescript \
+    @types/node \
+    nodemon \
+    pm2 \
+    eslint \
+    prettier
+
+# Set up directories
+RUN mkdir -p /workspace /home/goose
+RUN useradd -u 1000 -m -s /bin/bash goose && \
+    chown -R goose:goose /home/goose
+
+WORKDIR /workspace
+CMD ["/bin/bash"]
